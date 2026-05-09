@@ -1,0 +1,460 @@
+```html
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>הורה במנוסה: מרוץ הקפה</title>
+    <style>
+        :root {
+            --bg-color: #e5eef5;
+            --accent-color: #ff7043;
+            --text-color: #37474f;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            touch-action: none; /* מונע גלילה בטלפון */
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #ffffff;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 10;
+        }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            font-weight: bold;
+            color: var(--text-color);
+            font-size: 1.1rem;
+        }
+
+        #energy-container {
+            width: 120px;
+            height: 14px;
+            background: #e0e0e0;
+            border-radius: 7px;
+            overflow: hidden;
+            margin-top: 8px;
+            border: 1px solid #ccc;
+        }
+
+        #energy-bar {
+            width: 100%;
+            height: 100%;
+            background: #4caf50;
+            transition: width 0.1s linear, background-color 0.3s;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 100;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .btn {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.4rem;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 30px;
+            pointer-events: auto;
+            box-shadow: 0 4px 15px rgba(255, 112, 67, 0.5);
+            transition: transform 0.1s, background 0.2s;
+        }
+
+        .btn:hover { background: #f4511e; }
+        .btn:active { transform: scale(0.95); }
+
+        h1 { margin-bottom: 10px; font-size: 2.5rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+        p { margin: 5px 0; font-size: 1.2rem; opacity: 0.9; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui-layer">
+        <div class="stat-box">
+            <div>זמן: <span id="score-val">0</span></div>
+        </div>
+        <div class="stat-box">
+            <div>מד אנרגיה</div>
+            <div id="energy-container">
+                <div id="energy-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="overlay">
+        <div id="start-screen">
+            <h1>הורה במנוסה 🏃‍♂️☕</h1>
+            <p>הילדים מחפשים תשומת לב!</p>
+            <p><strong>איך משחקים?</strong></p>
+            <p>🖱️ עכבר / מגע: לחצו או גררו במסך</p>
+            <p>⌨️ מקלדת: חצים או W, A, S, D</p>
+            <p>אספו קפה ☕ וברחו מהילדים 👶</p>
+            <button class="btn" onclick="startGame()">התחל משחק</button>
+        </div>
+        <div id="game-over-screen" class="hidden">
+            <h1>האנרגיה נגמרה... 😴</h1>
+            <p>הצלחת לשרוד במשך <span id="final-score">0</span> שניות.</p>
+            <p id="rank-msg" style="font-weight: bold; color: #ffab91; font-size: 1.5rem; margin-top: 15px;"></p>
+            <button class="btn" onclick="startGame()">שחק שוב</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score-val');
+    const energyBar = document.getElementById('energy-bar');
+    const overlay = document.getElementById('overlay');
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const finalScoreDisplay = document.getElementById('final-score');
+    const rankMsg = document.getElementById('rank-msg');
+
+    let gameActive = false;
+    let score = 0;
+    let energy = 100;
+    let children = [];
+    let coffees = [];
+    let particles = [];
+    let lastTime = null;
+    let spawnTimer = 0;
+    let coffeeTimer = 0;
+    
+    // מעקב אחר לחיצות מקלדת
+    const keys = {};
+
+    const player = {
+        x: 0,
+        y: 0,
+        radius: 25,
+        targetX: 0,
+        targetY: 0,
+        emoji: '🏃',
+        speed: 0.15,
+        keyboardSpeed: 5
+    };
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        if (!gameActive) {
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            player.targetX = player.x;
+            player.targetY = player.y;
+        }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // טיפול בקלט עכבר/מגע
+    function setTarget(x, y) {
+        player.targetX = x;
+        player.targetY = y;
+    }
+
+    window.addEventListener('mousemove', (e) => setTarget(e.clientX, e.clientY));
+    window.addEventListener('mousedown', (e) => setTarget(e.clientX, e.clientY));
+    
+    window.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 0) {
+            setTarget(e.touches[0].clientX, e.touches[0].clientY);
+            player.x = e.touches[0].clientX; // קפיצה מיידית בנגיעה ראשונה לשיפור תגובתיות
+            player.y = e.touches[0].clientY;
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+        e.preventDefault(); // מונע גלילה בטלפון
+        if (e.touches.length > 0) {
+            setTarget(e.touches[0].clientX, e.touches[0].clientY);
+        }
+    }, { passive: false });
+
+    // טיפול בקלט מקלדת
+    window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+    window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+    class Child {
+        constructor() {
+            this.radius = 20;
+            // הופעה מחוץ למסך
+            const edge = Math.floor(Math.random() * 4);
+            if (edge === 0) { this.x = -50; this.y = Math.random() * canvas.height; }
+            else if (edge === 1) { this.x = canvas.width + 50; this.y = Math.random() * canvas.height; }
+            else if (edge === 2) { this.x = Math.random() * canvas.width; this.y = -50; }
+            else { this.x = Math.random() * canvas.width; this.y = canvas.height + 50; }
+            
+            this.speed = 1.0 + (Math.random() * 1.5) + (score / 50); // מהירות עולה עם הזמן
+            this.emoji = ['👶', '👧', '👦', '🧸'][Math.floor(Math.random() * 4)];
+        }
+
+        update() {
+            const dx = player.x - this.x;
+            const dy = player.y - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist > 0) {
+                this.x += (dx / dist) * this.speed;
+                this.y += (dy / dist) * this.speed;
+            }
+
+            // התנגשות עם השחקן
+            if (dist < this.radius + player.radius) {
+                energy -= 0.8; // הורדת אנרגיה
+                if (Math.random() > 0.8) createParticles(this.x, this.y, '#ffcc80', 1);
+            }
+        }
+
+        draw() {
+            ctx.font = '35px Arial';
+            ctx.fillText(this.emoji, this.x, this.y);
+        }
+    }
+
+    class Coffee {
+        constructor() {
+            this.x = 50 + Math.random() * (canvas.width - 100);
+            this.y = 50 + Math.random() * (canvas.height - 100);
+            this.radius = 20;
+            this.life = 7000; // זמן עד שהקפה נעלם
+        }
+        draw(dt) {
+            this.life -= dt;
+            const scale = 1 + Math.sin(Date.now() / 150) * 0.15; // פעימות
+            ctx.font = `${30 * scale}px Arial`;
+            ctx.fillText('☕', this.x, this.y);
+        }
+    }
+
+    function createParticles(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 0.5) * 8,
+                life: 1.0,
+                color: color
+            });
+        }
+    }
+
+    // הפעלת המשחק מהכפתור (חייבת להיות גלובלית)
+    window.startGame = function() {
+        gameActive = true;
+        energy = 100;
+        score = 0;
+        children = [];
+        coffees = [];
+        particles = [];
+        spawnTimer = 0;
+        coffeeTimer = 0;
+        lastTime = null; // איפוס זמן לפריים הראשון
+        
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+        player.targetX = player.x;
+        player.targetY = player.y;
+
+        overlay.classList.add('hidden');
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        
+        requestAnimationFrame(gameLoop);
+    };
+
+    function gameOver() {
+        gameActive = false;
+        overlay.classList.remove('hidden');
+        gameOverScreen.classList.remove('hidden');
+        
+        const finalS = Math.floor(score);
+        finalScoreDisplay.innerText = finalS;
+        
+        if (finalS < 20) rankMsg.innerText = "הילדים ניצחו מהר מדי 😅";
+        else if (finalS < 50) rankMsg.innerText = "הורה ממוצע בהחלט! 👏";
+        else if (finalS < 90) rankMsg.innerText = "ביצועים מרשימים! 💪";
+        else rankMsg.innerText = "אגדת הורות! איך יש לך כוח?! 👑";
+    }
+
+    function gameLoop(timestamp) {
+        if (!gameActive) return;
+
+        // טיפול בפריים הראשון וחישוב זמן שעבר
+        if (lastTime === null) lastTime = timestamp;
+        let dt = timestamp - lastTime;
+        lastTime = timestamp;
+
+        // מניעת באגים אם העמוד היה ברקע (הגבלת הקפיצה)
+        if (dt > 50) dt = 16; 
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // עדכון ניקוד
+        score += dt / 1000;
+        scoreElement.innerText = Math.floor(score);
+
+        // ירידת אנרגיה קבועה
+        energy -= (dt / 1000) * 4; // מאבד 4 אנרגיה בשנייה
+        energyBar.style.width = `${Math.max(0, energy)}%`;
+        
+        if (energy < 30) energyBar.style.backgroundColor = '#f44336'; // אדום
+        else if (energy < 60) energyBar.style.backgroundColor = '#ffc107'; // צהוב
+        else energyBar.style.backgroundColor = '#4caf50'; // ירוק
+
+        if (energy <= 0) {
+            gameOver();
+            return;
+        }
+
+        // --- תנועת שחקן ---
+        // מקלדת
+        let movedWithKeyboard = false;
+        if (keys['ArrowUp'] || keys['w'] || keys['W']) { player.y -= player.keyboardSpeed; movedWithKeyboard = true; }
+        if (keys['ArrowDown'] || keys['s'] || keys['S']) { player.y += player.keyboardSpeed; movedWithKeyboard = true; }
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) { player.x -= player.keyboardSpeed; movedWithKeyboard = true; }
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) { player.x += player.keyboardSpeed; movedWithKeyboard = true; }
+
+        // אם לא זז במקלדת, יזוז לעבר העכבר/מגע
+        if (!movedWithKeyboard) {
+            player.x += (player.targetX - player.x) * player.speed;
+            player.y += (player.targetY - player.y) * player.speed;
+        } else {
+            // עדכון המטרה כדי שלא יקפוץ אחורה לעכבר
+            player.targetX = player.x;
+            player.targetY = player.y;
+        }
+
+        // גבולות מסך לשחקן
+        player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+        player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
+
+        // ציור שחקן
+        ctx.font = '50px Arial';
+        ctx.fillText(player.emoji, player.x, player.y);
+
+        // --- יצירת ילדים ---
+        spawnTimer += dt;
+        const currentSpawnRate = Math.max(300, 2000 - (score * 30)); // קצב מואץ
+        if (spawnTimer > currentSpawnRate) {
+            children.push(new Child());
+            spawnTimer = 0;
+        }
+
+        // --- יצירת קפה ---
+        coffeeTimer += dt;
+        if (coffeeTimer > 3000) {
+            if (coffees.length < 3) coffees.push(new Coffee()); // מקסימום 3 כוסות בו זמנית
+            coffeeTimer = 0;
+        }
+
+        // --- עדכון ילדים ---
+        for (let i = children.length - 1; i >= 0; i--) {
+            children[i].update();
+            children[i].draw();
+        }
+
+        // --- עדכון קפה ---
+        for (let i = coffees.length - 1; i >= 0; i--) {
+            const c = coffees[i];
+            c.draw(dt);
+            
+            const dx = player.x - c.x;
+            const dy = player.y - c.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < player.radius + c.radius) {
+                // איסוף קפה
+                energy = Math.min(100, energy + 30);
+                createParticles(c.x, c.y, '#8d6e63', 15);
+                coffees.splice(i, 1);
+            } else if (c.life <= 0) {
+                // קפה נעלם
+                coffees.splice(i, 1);
+            }
+        }
+
+        // --- חלקיקים (אפקטים) ---
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= dt / 500; // חיים נגמרים עם הזמן
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+            } else {
+                ctx.globalAlpha = Math.max(0, p.life);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1; // החזרת השקיפות למצב רגיל
+            }
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+</script>
+
+</body>
+</html>
+
+
+```
